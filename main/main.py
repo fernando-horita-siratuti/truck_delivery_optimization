@@ -20,7 +20,7 @@ for node_id, node_attrs in G.nodes(data=True):
 
 df_nodes = pd.DataFrame(nodes_data)
 df_nodes.to_csv('divinopolis_nodes.csv', index=False)
-print(f"✅ Dados dos {len(df_nodes)} nós salvos em 'divinopolis_nodes.csv'")
+print(f"Dados dos {len(df_nodes)} nós salvos em 'divinopolis_nodes.csv'")
 
 edges_data = []
 for edge in G.edges(data=True):
@@ -39,4 +39,4 @@ for edge in G.edges(data=True):
 
 df_edges = pd.DataFrame(edges_data)
 df_edges.to_csv('divinopolis_edges.csv', index=False)
-print(f"✅ Dados das {len(df_edges)} arestas salvos em 'divinopolis_edges.csv'")
+print(f"Dados das {len(df_edges)} arestas salvos em 'divinopolis_edges.csv'")
