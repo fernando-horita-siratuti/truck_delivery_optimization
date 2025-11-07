@@ -2,17 +2,26 @@ import osmnx as ox
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from calculation.elevation import get_elevation
+
 G = ox.graph_from_place("Divinópolis, MG, Brazil", network_type='drive')
 print(f"Grafo: {len(G.nodes)} nós, {len(G.edges)} arestas")
 
 nodes_data = []
 
 for node_id, node_attrs in G.nodes(data=True):
+    latitude = node_attrs.get('y')
+    longitude = node_attrs.get('x')
+    elevation = node_attrs.get('elevation')
+
+    if elevation in ('', None) and latitude is not None and longitude is not None:
+        elevation = get_elevation(latitude, longitude)
+
     nodes_data.append({
         'node_id': node_id,
-        'latitude': node_attrs.get('y', ''),
-        'longitude': node_attrs.get('x', ''),
-        'elevation': node_attrs.get('elevation', ''),
+        'latitude': latitude if latitude is not None else '',
+        'longitude': longitude if longitude is not None else '',
+        'elevation': elevation if elevation is not None else '',
         'street_count': node_attrs.get('street_count', ''),
         'highway': node_attrs.get('highway', ''),
         'ref': node_attrs.get('ref', '')

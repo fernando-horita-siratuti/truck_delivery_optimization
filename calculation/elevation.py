@@ -9,8 +9,10 @@ def get_elevation(lat, lon):
     try:
         response = requests.get(url)
         data = response.json()
+        print("data request ok lat: ", lat, "lon: ", lon)
         return data['results'][0]['elevation']
     except:
+        print(f"Erro ao buscar elevação para {lat}, {lon}")
         return None
 
 def horizontal_displacement_m(lat1, lon1, lat2, lon2):
