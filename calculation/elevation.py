@@ -1,19 +1,165 @@
-import requests
-import pandas as pd
-import numpy as np
+import json
 import math
+import threading
+import time
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
 
-def get_elevation(lat, lon):
-    """Busca elevação de um ponto usando a API"""
-    url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
+import requests
+
+_CACHE_LOCK = threading.Lock()
+_CACHE_FILE = Path(__file__).resolve().parent / "elevation_cache.json"
+_CACHE: Dict[str, float] = {}
+_SESSION = requests.Session()
+_SESSION_TIMEOUT = 5
+_MAX_BATCH_SIZE = 50
+_RETRY_ATTEMPTS = 3
+_RETRY_SLEEP = 1.0
+
+
+def _load_cache() -> None:
+    if _CACHE:
+        return
+    if not _CACHE_FILE.exists():
+        return
     try:
-        response = requests.get(url)
-        data = response.json()
-        print("data request ok lat: ", lat, "lon: ", lon)
-        return data['results'][0]['elevation']
-    except:
-        print(f"Erro ao buscar elevação para {lat}, {lon}")
-        return None
+        with _CACHE_FILE.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except Exception:
+        return
+    if isinstance(data, dict):
+        with _CACHE_LOCK:
+            for key, value in data.items():
+                try:
+                    _CACHE[key] = float(value)
+                except (TypeError, ValueError):
+                    continue
+
+
+def _save_cache() -> None:
+    with _CACHE_LOCK:
+        snapshot = dict(_CACHE)
+        tmp_path = _CACHE_FILE.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as fp:
+            json.dump(snapshot, fp, ensure_ascii=False)
+        tmp_path.replace(_CACHE_FILE)
+
+
+def _coord_key(lat: float, lon: float, precision: int = 6) -> str:
+    return f"{round(lat, precision)},{round(lon, precision)}"
+
+
+def _batched(iterable: Iterable[Tuple[float, float]], size: int) -> Iterable[List[Tuple[float, float]]]:
+    batch: List[Tuple[float, float]] = []
+    for item in iterable:
+        batch.append(item)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def _fetch_batch(coords: List[Tuple[float, float]]) -> Dict[str, Optional[float]]:
+    locations = "|".join(f"{lat},{lon}" for lat, lon in coords)
+    url = f"https://api.open-elevation.com/api/v1/lookup?locations={locations}"
+
+    for attempt in range(_RETRY_ATTEMPTS):
+        fetched: Dict[str, Optional[float]] = {}
+        try:
+            response = _SESSION.get(url, timeout=_SESSION_TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+        except Exception:
+            results = None
+
+        if results:
+            for item in results:
+                lat = item.get("latitude")
+                lon = item.get("longitude")
+                elevation = item.get("elevation")
+                if lat is None or lon is None:
+                    continue
+                fetched[_coord_key(lat, lon)] = elevation
+
+        missing_keys = [
+            _coord_key(lat, lon)
+            for lat, lon in coords
+            if _coord_key(lat, lon) not in fetched
+        ]
+
+        if fetched and not missing_keys:
+            return fetched
+
+        if attempt < _RETRY_ATTEMPTS - 1:
+            time.sleep(_RETRY_SLEEP * (attempt + 1))
+
+    fallback: Dict[str, Optional[float]] = {}
+    for lat, lon in coords:
+        fallback[_coord_key(lat, lon)] = _fetch_single(lat, lon)
+    return fallback
+
+
+def _fetch_single(lat: float, lon: float) -> Optional[float]:
+    url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            response = _SESSION.get(url, timeout=_SESSION_TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+        except Exception:
+            results = None
+
+        if results:
+            elevation = results[0].get("elevation")
+            if elevation is not None:
+                return elevation
+
+        if attempt < _RETRY_ATTEMPTS - 1:
+            time.sleep(_RETRY_SLEEP * (attempt + 1))
+
+    return None
+
+
+def get_elevations(coords: List[Tuple[float, float]]) -> List[Optional[float]]:
+    """Busca elevação para uma lista de coordenadas com cache e requisições em lote."""
+    _load_cache()
+
+    results: List[Optional[float]] = []
+    missing: Dict[str, Tuple[float, float]] = {}
+
+    with _CACHE_LOCK:
+        for lat, lon in coords:
+            key = _coord_key(lat, lon)
+            if key in _CACHE:
+                results.append(_CACHE[key])
+            else:
+                results.append(None)
+                missing[key] = (lat, lon)
+
+    if missing:
+        for batch in _batched(missing.values(), _MAX_BATCH_SIZE):
+            fetched = _fetch_batch(batch)
+            with _CACHE_LOCK:
+                for key, value in fetched.items():
+                    if value is not None:
+                        _CACHE[key] = value
+            for idx, (lat, lon) in enumerate(coords):
+                key = _coord_key(lat, lon)
+                if key in fetched and results[idx] is None:
+                    results[idx] = fetched[key]
+
+        _save_cache()
+
+    return results
+
+
+def get_elevation(lat: float, lon: float) -> Optional[float]:
+    """Busca elevação de um ponto usando cache e requisições em lote."""
+    returned = get_elevations([(lat, lon)])
+    return returned[0] if returned else None
 
 def horizontal_displacement_m(lat1, lon1, lat2, lon2):
     """Retorna (x, y, dist_horizontal) em metros.
