@@ -2,10 +2,9 @@ import json
 import math
 import threading
 import time
+import requests
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-
-import requests
 
 _CACHE_LOCK = threading.Lock()
 _CACHE_FILE = Path(__file__).resolve().parent / "elevation_cache.json"

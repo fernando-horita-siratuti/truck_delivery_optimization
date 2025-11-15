@@ -9,3 +9,4 @@ geopandas==0.12.2
 osmnx==1.2.2
 folium==0.14.0
 pyrosm==0.5.3
+geopy==2.3.0

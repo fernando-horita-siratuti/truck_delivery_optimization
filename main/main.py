@@ -5,7 +5,6 @@ import pandas as pd
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple
-
 from calculation.elevation import get_elevations
 
 ROUND_PRECISION = 6
